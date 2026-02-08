@@ -1,11 +1,10 @@
 import React from 'react'
 import ReactDOM from 'react-dom/client'
-import App from './App'
-import LandingPage from './components/LandingPage'
+import InteractiveLanding from './components/InteractiveLanding'
 import './styles.css'
 
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
-    <LandingPage />
+    <InteractiveLanding />
   </React.StrictMode>
 )
