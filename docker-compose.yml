@@ -1,0 +1,127 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: healthcare-postgres
+    environment:
+      POSTGRES_USER: healthcare_user
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-secure_password_change_in_production}
+      POSTGRES_DB: healthcare_platform
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./server/src/database/postgres/schema.sql:/docker-entrypoint-initdb.d/schema.sql
+    ports:
+      - "5432:5432"
+    networks:
+      - healthcare-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U healthcare_user -d healthcare_platform"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # MongoDB for Medical Reports
+  mongodb:
+    image: mongo:7-alpine
+    container_name: healthcare-mongodb
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: admin
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_PASSWORD:-secure_mongo_password}
+      MONGO_INITDB_DATABASE: medical_reports
+    volumes:
+      - mongo_data:/data/db
+    ports:
+      - "27017:27017"
+    networks:
+      - healthcare-network
+    healthcheck:
+      test: echo 'db.runCommand("ping").ok' | mongosh localhost:27017/test --quiet
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Node.js Backend
+  server:
+    build:
+      context: ./server
+      dockerfile: Dockerfile
+    container_name: healthcare-server
+    environment:
+      - NODE_ENV=production
+      - PORT=5000
+      - JWT_SECRET=${JWT_SECRET:-your-super-secret-jwt-key-change-in-production}
+      - DATABASE_URL=postgresql://healthcare_user:${POSTGRES_PASSWORD:-secure_password_change_in_production}@postgres:5432/healthcare_platform
+      - MONGODB_URL=mongodb://admin:${MONGO_PASSWORD:-secure_mongo_password}@mongodb:27017/medical_reports?authSource=admin
+      - AI_SERVICE_URL=http://ai-service:8000
+      - CLIENT_URL=http://localhost:3000
+    ports:
+      - "5000:5000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mongodb:
+        condition: service_healthy
+    networks:
+      - healthcare-network
+    volumes:
+      - uploads_data:/app/uploads
+    restart: unless-stopped
+
+  # AI Service (FastAPI)
+  ai-service:
+    build:
+      context: ./ai-service
+      dockerfile: Dockerfile
+    container_name: healthcare-ai-service
+    environment:
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - LLM_MODEL=gpt-4
+    ports:
+      - "8000:8000"
+    networks:
+      - healthcare-network
+    volumes:
+      - ./ai-service/logs:/app/logs
+    restart: unless-stopped
+
+  # React Frontend
+  client:
+    build:
+      context: ./client
+      dockerfile: Dockerfile
+    container_name: healthcare-client
+    environment:
+      - VITE_API_URL=http://localhost:5000
+      - VITE_SOCKET_URL=http://localhost:5000
+    ports:
+      - "3000:80"
+    depends_on:
+      - server
+    networks:
+      - healthcare-network
+    restart: unless-stopped
+
+  # Redis for Caching and Sessions
+  redis:
+    image: redis:7-alpine
+    container_name: healthcare-redis
+    ports:
+      - "6379:6379"
+    networks:
+      - healthcare-network
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  mongo_data:
+  uploads_data:
+  redis_data:
+
+networks:
+  healthcare-network:
+    driver: bridge
